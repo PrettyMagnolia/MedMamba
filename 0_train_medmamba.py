@@ -128,25 +128,25 @@ class Trainer:
 
 if __name__ == '__main__':
     # 训练 Contact 任务
+    # trainer = Trainer(
+    #     model_name="Contact_Task_MedMamba",
+    #     num_classes=2,
+    #     train_root_dir="/home/yifei/code/Med_CV/MedMamba/dataset/3_contact_task/train",
+    #     val_root_dir="/home/yifei/code/Med_CV/MedMamba/dataset/3_contact_task/val",
+    #     test_root_dir="/home/yifei/code/Med_CV/MedMamba/dataset/3_contact_task/test",
+    #     batch_size=16,
+    #     epochs=100,
+    #     lr=1e-7
+    # )
+    # 训练 Spatial 任务
     trainer = Trainer(
-        model_name="Contact_Task_MedMamba",
-        num_classes=2,
-        train_root_dir="/home/yifei/code/Med_CV/MedMamba/dataset/3_contact_task/train",
-        val_root_dir="/home/yifei/code/Med_CV/MedMamba/dataset/3_contact_task/val",
-        test_root_dir="/home/yifei/code/Med_CV/MedMamba/dataset/3_contact_task/test",
+        model_name="Spatial_Task_MedMamba",
+        num_classes=4,
+        train_root_dir="/home/yifei/code/Med_CV/MedMamba/dataset/4_spatial_task/train",
+        val_root_dir="/home/yifei/code/Med_CV/MedMamba/dataset/4_spatial_task/val",
+        test_root_dir="/home/yifei/code/Med_CV/MedMamba/dataset/4_spatial_task/test",
         batch_size=32,
         epochs=100,
-        lr=0.000005
+        lr=5e-6
     )
-    # 训练 Spatial 任务
-    # trainer = Trainer(
-    #     model_name="Spatial_Task_MedMamba",
-    #     num_classes=4,
-    #     train_root_dir="/home/yifei/code/Med_CV/MedMamba/dataset/4_spatial_task/train",
-    #     val_root_dir="/home/yifei/code/Med_CV/MedMamba/dataset/4_spatial_task/val",
-    #     test_root_dir="/home/yifei/code/Med_CV/MedMamba/dataset/4_spatial_task/test",
-    #     batch_size=32,
-    #     epochs=100,
-    #     lr=0.000005
-    # )
     trainer.train()
