@@ -1,23 +1,12 @@
+
 import os
 import argparse
 import torch
 import numpy as np
-from torchvision import datasets
-from sklearn.metrics import (
-    precision_score, recall_score, roc_auc_score, f1_score,
-    confusion_matrix, accuracy_score, ConfusionMatrixDisplay,
-    RocCurveDisplay, PrecisionRecallDisplay
-)
+from torchvision import datasets, transforms
+from sklearn.metrics import precision_score, recall_score, roc_auc_score, f1_score, confusion_matrix, accuracy_score, ConfusionMatrixDisplay, RocCurveDisplay, PrecisionRecallDisplay
 import matplotlib.pyplot as plt
-
-from transformers import (
-    AutoImageProcessor,
-    AutoModelForImageClassification,
-    ConvNextImageProcessor,
-    ConvNextForImageClassification,
-    ViTImageProcessor,
-    ViTForImageClassification,
-)
+from MedMamba import VSSM as medmamba
 
 try:
     from thop import profile
@@ -25,74 +14,42 @@ except ImportError:
     profile = None
 
 class ImageFolderDataset(torch.utils.data.Dataset):
-    def __init__(self, root, processor):
-        self.base_dataset = datasets.ImageFolder(root=root)
-        self.processor = processor
-
+    def __init__(self, root, transform):
+        self.base_dataset = datasets.ImageFolder(root=root, transform=transform)
     def __len__(self):
         return len(self.base_dataset)
-
     def __getitem__(self, idx):
-        img, label = self.base_dataset[idx]
-        pixel_values = self.processor(img, return_tensors="pt")["pixel_values"].squeeze(0)
-        return pixel_values, label
+        return self.base_dataset[idx]
 
 class Tester:
-    def __init__(self, model_type, num_classes, ckpt_path, test_root_dir, batch_size=64, pretrained_path=None):
+    def __init__(self, num_classes, ckpt_path, test_root_dir, batch_size=64):
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         print(f"using {self.device} device.")
-        self.model_type = model_type
         self.num_classes = num_classes
         self.ckpt_path = ckpt_path
         self.test_root_dir = test_root_dir
         self.batch_size = batch_size
-
         self.output_dir = os.path.dirname(os.path.abspath(self.ckpt_path))
         os.makedirs(self.output_dir, exist_ok=True)
-
-        # 选择模型和预处理
-        if model_type == "resnet":
-            processor_path = pretrained_path or "microsoft/resnet-50"
-            self.data_transform = AutoImageProcessor.from_pretrained(processor_path)
-            self.model_cls = lambda: AutoModelForImageClassification.from_pretrained(
-                processor_path, num_labels=self.num_classes, ignore_mismatched_sizes=True
-            )
-        elif model_type == "vit":
-            processor_path = pretrained_path or "google/vit-base-patch16-224"
-            self.data_transform = ViTImageProcessor.from_pretrained(processor_path)
-            self.model_cls = lambda: ViTForImageClassification.from_pretrained(
-                processor_path, num_labels=self.num_classes, ignore_mismatched_sizes=True
-            )
-        elif model_type == "convnext":
-            processor_path = pretrained_path or "facebook/convnext-tiny-224"
-            self.data_transform = ConvNextImageProcessor.from_pretrained(processor_path)
-            self.model_cls = lambda: ConvNextForImageClassification.from_pretrained(
-                processor_path, num_labels=self.num_classes, ignore_mismatched_sizes=True
-            )
-        elif model_type == "swin":
-            processor_path = pretrained_path or "microsoft/swin-tiny-patch4-window7-224"
-            self.data_transform = AutoImageProcessor.from_pretrained(processor_path)
-            self.model_cls = lambda: AutoModelForImageClassification.from_pretrained(
-                processor_path, num_labels=self.num_classes, ignore_mismatched_sizes=True
-            )
-        else:
-            raise ValueError(f"Unknown model_type: {model_type}")
-
+        self.data_transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        ])
         self._load_data()
         self._load_model()
 
     def _load_data(self):
-        self.test_dataset = ImageFolderDataset(root=self.test_root_dir, processor=self.data_transform)
+        self.test_dataset = ImageFolderDataset(root=self.test_root_dir, transform=self.data_transform)
         self.test_loader = torch.utils.data.DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False, num_workers=4)
         self.class_names = self.test_dataset.base_dataset.classes
 
     def _load_model(self):
-        self.net = self.model_cls()
+        self.net = medmamba(num_classes=self.num_classes)
         self.net.to(self.device)
         self.net.eval()
         if self.ckpt_path and os.path.exists(self.ckpt_path):
-            state_dict = torch.load(self.ckpt_path, map_location=self.device)
-            self.net.load_state_dict(state_dict)
+            self.net.load_state_dict(torch.load(self.ckpt_path, map_location=self.device))
             print(f"Loaded checkpoint from {self.ckpt_path}")
         else:
             raise FileNotFoundError(f"Checkpoint not found at {self.ckpt_path}")
@@ -103,7 +60,7 @@ class Tester:
         all_probs = []
         with torch.no_grad():
             for images, labels in self.test_loader:
-                outputs = self.net(images.to(self.device)).logits
+                outputs = self.net(images.to(self.device))
                 probs = torch.softmax(outputs, dim=1)
                 _, predicted = torch.max(probs, 1)
                 all_labels.extend(labels.cpu().numpy())
@@ -226,21 +183,17 @@ class Tester:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model_type', type=str, required=True, choices=['resnet', 'vit', 'convnext', 'swin'])
     parser.add_argument('--num_classes', type=int, required=True)
     parser.add_argument('--ckpt_path', type=str, required=True)
     parser.add_argument('--test_root_dir', type=str, required=True)
     parser.add_argument('--batch_size', type=int, default=64)
-    parser.add_argument('--pretrained_path', type=str, default=None, help='Path to a local pretrained model or model identifier from huggingface.co/models')
 
     args = parser.parse_args()
 
     tester = Tester(
-        model_type=args.model_type,
         num_classes=args.num_classes,
         ckpt_path=args.ckpt_path,
         test_root_dir=args.test_root_dir,
-        batch_size=args.batch_size,
-        pretrained_path=args.pretrained_path
+        batch_size=args.batch_size
     )
     tester.run_all()

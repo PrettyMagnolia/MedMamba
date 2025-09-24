@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import time
+import argparse
 
 import torch
 import torch.nn as nn
@@ -127,26 +128,28 @@ class Trainer:
         self.writer.close()
 
 if __name__ == '__main__':
-    # 训练 Contact 任务
-    # trainer = Trainer(
-    #     model_name="Contact_Task_MedMamba",
-    #     num_classes=2,
-    #     train_root_dir="/home/yifei/code/Med_CV/MedMamba/dataset/3_contact_task/train",
-    #     val_root_dir="/home/yifei/code/Med_CV/MedMamba/dataset/3_contact_task/val",
-    #     test_root_dir="/home/yifei/code/Med_CV/MedMamba/dataset/3_contact_task/test",
-    #     batch_size=16,
-    #     epochs=100,
-    #     lr=1e-7
-    # )
-    # 训练 Spatial 任务
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--model_name', type=str, required=True)
+    parser.add_argument('--num_classes', type=int, required=True)
+    parser.add_argument('--train_root_dir', type=str, required=True)
+    parser.add_argument('--val_root_dir', type=str, required=True)
+    parser.add_argument('--test_root_dir', type=str, required=True)
+    parser.add_argument('--batch_size', type=int, default=32)
+    parser.add_argument('--epochs', type=int, default=100)
+    parser.add_argument('--lr', type=float, default=5e-6)
+    parser.add_argument('--log_dir', type=str, default='./logs')
+
+    args = parser.parse_args()
+
     trainer = Trainer(
-        model_name="Spatial_Task_MedMamba",
-        num_classes=4,
-        train_root_dir="/home/yifei/code/Med_CV/MedMamba/dataset/4_spatial_task/train",
-        val_root_dir="/home/yifei/code/Med_CV/MedMamba/dataset/4_spatial_task/val",
-        test_root_dir="/home/yifei/code/Med_CV/MedMamba/dataset/4_spatial_task/test",
-        batch_size=32,
-        epochs=100,
-        lr=5e-6
+        model_name=args.model_name,
+        num_classes=args.num_classes,
+        train_root_dir=args.train_root_dir,
+        val_root_dir=args.val_root_dir,
+        test_root_dir=args.test_root_dir,
+        batch_size=args.batch_size,
+        epochs=args.epochs,
+        lr=args.lr,
+        log_dir=args.log_dir
     )
     trainer.train()
