@@ -38,17 +38,17 @@ class ImageFolderDataset(torch.utils.data.Dataset):
         return pixel_values, label
 
 class Tester:
-    def __init__(self, model_type, num_classes, ckpt_path, test_root_dir, batch_size=64, pretrained_path=None):
+    def __init__(self, model_type, num_classes, prediction_files, test_root_dir, batch_size=64, pretrained_path=None):
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         print(f"using {self.device} device.")
         self.model_type = model_type
         self.num_classes = num_classes
-        self.ckpt_path = ckpt_path
+        self.prediction_files = prediction_files
         self.test_root_dir = test_root_dir
         self.batch_size = batch_size
 
-        self.output_dir = os.path.dirname(os.path.abspath(self.ckpt_path))
-        os.makedirs(self.output_dir, exist_ok=True)
+        # self.output_dir = os.path.dirname(os.path.abspath(self.ckpt_path))
+        # os.makedirs(self.output_dir, exist_ok=True)
 
         # 选择模型和预处理
         if model_type == "resnet":
@@ -79,7 +79,7 @@ class Tester:
             raise ValueError(f"Unknown model_type: {model_type}")
 
         self._load_data()
-        self._load_model()
+        # self._load_model()
 
     def _load_data(self):
         self.test_dataset = ImageFolderDataset(root=self.test_root_dir, processor=self.data_transform)
@@ -101,24 +101,60 @@ class Tester:
         all_labels = []
         all_preds = []
         all_probs = []
-        with torch.no_grad():
-            for images, labels in self.test_loader:
-                outputs = self.net(images.to(self.device)).logits
-                probs = torch.softmax(outputs, dim=1)
-                _, predicted = torch.max(probs, 1)
-                all_labels.extend(labels.cpu().numpy())
-                all_preds.extend(predicted.cpu().numpy())
-                all_probs.extend(probs.cpu().numpy())
-        return np.array(all_labels), np.array(all_preds), np.array(all_probs)
+        # with torch.no_grad():
+        #     for images, labels in self.test_loader:
+        #         outputs = self.net(images.to(self.device)).logits
+        #         probs = torch.softmax(outputs, dim=1)
+        #         _, predicted = torch.max(probs, 1)
+        #         all_labels.extend(labels.cpu().numpy())
+        #         all_preds.extend(predicted.cpu().numpy())
+        #         all_probs.extend(probs.cpu().numpy())
+        # return np.array(all_labels), np.array(all_preds), np.array(all_probs)
+        # 从 csv 文件中读取多个模型的预测结果，进行 soft voting
+        for prediction_file in self.prediction_files:
+            preds = []
+            probs = []
+            with open(prediction_file, "r") as f:
+                next(f)  # 跳过表头
+                for line in f:
+                    parts = line.strip().split(",")
+                    print(parts)
+                    label = int(parts[1])
+                    pred = int(parts[2])
+                    prob = np.array([
+                        float(parts[3].replace('[', '')),
+                        float(parts[4]),
+                        float(parts[5]),
+                        float(parts[6].replace(']', ''))
+                    ])
+                
+                    preds.append(pred)
+                    probs.append(prob)
+                    if len(all_labels) < len(self.test_dataset):
+                        all_labels.append(label)
+            all_preds.append(preds)
+            all_probs.append(probs)
+        
+        soft_voted_probs = np.mean(np.array(all_probs), axis=0)
+        soft_voted_preds = np.argmax(soft_voted_probs, axis=1)
+        # hard_voted_preds = []
+        # hard_voted_probs = []
+        # for i in range(len(self.test_dataset)):
+        #     votes = [all_preds[m][i] for m in range(len(self.prediction_files))]
+        #     hard_voted_pred = max(set(votes), key=votes.count)
+        #     hard_voted_preds.append(hard_voted_pred)
+        #     hard_voted_probs.
+        return np.array(all_labels), soft_voted_preds, soft_voted_probs
 
     def calc_metrics(self, labels, preds, probs):
         metrics = {}
-        metrics['flops'], metrics['params'] = self.calc_flops_params()
+        # metrics['flops'], metrics['params'] = self.calc_flops_params()
         metrics['accuracy'] = accuracy_score(labels, preds)
         metrics['precision'] = precision_score(labels, preds, average=None, zero_division=0).tolist()
         metrics['recall'] = recall_score(labels, preds, average=None, zero_division=0).tolist()
         metrics['specificity'] = self.calc_specificity(labels, preds)
         metrics['f1'] = f1_score(labels, preds, average=None, zero_division=0).tolist()
+        print(labels, probs)
         metrics['auc'] = self.calc_auc(labels, probs)
         return metrics
 
@@ -206,7 +242,7 @@ class Tester:
         with open(metrics_file, "w") as f:
             f.write(f"FLOPs: {metrics['flops']}\n")
             f.write(f"Params: {metrics['params']}\n")
-            f.write(f"Accuracy: {metrics['accuracy']}\n")
+            f.write(f"Accuracy: {metrics['accuracy']:.3f}\n")
             f.write(f"Precision (per class): {metrics['precision']}\n")
             f.write(f"Sensitivity/Recall (per class): {metrics['recall']}\n")
             f.write(f"Specificity (per class): {metrics['specificity']}\n")
@@ -217,14 +253,14 @@ class Tester:
         labels, preds, probs = self.get_preds_labels_probs()
         print(f"类别: {self.class_names}")
         metrics = self.calc_metrics(labels, preds, probs)
-        print(f"FLOPs: {metrics['flops']:.2e}, Params: {metrics['params']:.2e}")
-        print(f"Accuracy: {metrics['accuracy']}")
+        # print(f"FLOPs: {metrics['flops']:.2e}, Params: {metrics['params']:.2e}")
+        print(f"Accuracy: {metrics['accuracy']:.3f}")
         print(f"Precision (per class): {metrics['precision']}")
         print(f"Sensitivity/Recall (per class): {metrics['recall']}")
         print(f"Specificity (per class): {metrics['specificity']}")
         print(f"F1 Score (per class): {metrics['f1']}")
         print(f"AUC (per class): {metrics['auc']}")
-        self.output_results(labels, preds, probs, metrics)
+        # self.output_results(labels, preds, probs, metrics)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -237,10 +273,16 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
+    prediction_files = [
+        # "/home/yifei/code/Med_CV/MedMamba/logs/Spatial_Task_Swin_All/bs64_ep1000_lr0.0001/2025-10-25-04-06-14/test_prediction.csv",
+        "/home/yifei/code/Med_CV/MedMamba/logs/Spatial_Task_Swin_All/bs64_ep1000_lr0.0001/2025-10-25-04-32-00/test_prediction.csv",
+        "/home/yifei/code/Med_CV/MedMamba/logs/Spatial_Task_Swin_All/bs64_ep1000_lr0.0001/2025-10-25-04-37-47/test_prediction.csv"
+    ]
+
     tester = Tester(
         model_type=args.model_type,
         num_classes=args.num_classes,
-        ckpt_path=args.ckpt_path,
+        prediction_files=prediction_files,
         test_root_dir=args.test_root_dir,
         batch_size=args.batch_size,
         pretrained_path=args.pretrained_path

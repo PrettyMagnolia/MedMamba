@@ -1,3 +1,4 @@
+
 import os
 import sys
 import json
@@ -27,6 +28,23 @@ from sklearn.metrics import (
     confusion_matrix, accuracy_score, ConfusionMatrixDisplay,
     RocCurveDisplay, PrecisionRecallDisplay
 )
+
+import numpy as np
+
+# ----------- Dataset Wrappers -----------
+class ImageFolderDataset(Dataset):
+    def __init__(self, root, processor):
+        self.base_dataset = datasets.ImageFolder(root=root)
+        self.processor = processor
+
+    def __len__(self):
+        return len(self.base_dataset)
+
+    def __getitem__(self, idx):
+        img, label = self.base_dataset[idx]
+        pixel_values = self.processor(img, return_tensors="pt")["pixel_values"].squeeze(0)
+        return pixel_values, label
+
 # ----------- Focal Loss -----------
 import torch.nn.functional as F
 class FocalLoss(nn.Module):
@@ -60,27 +78,31 @@ class FocalLoss(nn.Module):
         else:
             return loss
 
-# ----------- Dataset Wrappers -----------
-class ImageFolderDataset(Dataset):
-    def __init__(self, root, processor):
-        self.base_dataset = datasets.ImageFolder(root=root)
-        self.processor = processor
+# ----------- Metric Learning Loss -----------
+class TripletLoss(nn.Module):
+    def __init__(self, margin=1.0, reduction='mean'):
+        super(TripletLoss, self).__init__()
+        self.margin = margin
+        self.reduction = reduction
 
-    def __len__(self):
-        return len(self.base_dataset)
-
-    def __getitem__(self, idx):
-        img, label = self.base_dataset[idx]
-        pixel_values = self.processor(img, return_tensors="pt")["pixel_values"].squeeze(0)
-        return pixel_values, label
-
+    def forward(self, anchor, positive, negative):
+        distance_positive = (anchor - positive).pow(2).sum(1)
+        distance_negative = (anchor - negative).pow(2).sum(1)
+        losses = torch.relu(distance_positive - distance_negative + self.margin)
+        if self.reduction == 'mean':
+            return losses.mean()
+        elif self.reduction == 'sum':
+            return losses.sum()
+        else:
+            return losses
+        
 # ----------- Trainer -----------
 class Trainer:
     def __init__(self, model_type, model_name, num_classes, train_root_dir, val_root_dir, test_root_dir,
-                 batch_size=32, epochs=100, lr=5e-6, log_dir='./logs', pretrained_path=None, f1_range=(0.0, 1.0), cls2_range=(0.0, 1.0)):
+                 batch_size=32, epochs=100, lr=5e-6, log_dir='./logs', pretrained_path=None):
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.model_type = model_type
-        self.model_name = model_name
+        self.model_name = model_name + "_" + "plus"
         self.num_classes = num_classes
         self.train_root_dir = train_root_dir
         self.val_root_dir = val_root_dir
@@ -88,8 +110,6 @@ class Trainer:
         self.batch_size = batch_size
         self.epochs = epochs
         self.lr = lr
-        self.f1_range = f1_range
-        self.cls2_range = cls2_range
 
         self.hyperparam_str = f"bs{self.batch_size}_ep{self.epochs}_lr{self.lr}"
         self.time_str = time.strftime("%Y-%m-%d-%H-%M-%S", time.localtime())
@@ -122,13 +142,6 @@ class Trainer:
             self.model_cls = lambda: AutoModelForImageClassification.from_pretrained(
                 processor_path, num_labels=self.num_classes, ignore_mismatched_sizes=True
             )
-        elif model_type == 'mamba':
-            from models.mamba_model import MedMambaForImageClassification, MedMambaImageProcessor
-            processor_path = pretrained_path or "state-spaces/mamba-130m"
-            self.data_transform = MedMambaImageProcessor.from_pretrained(processor_path)
-            self.model_cls = lambda: MedMambaForImageClassification.from_pretrained(
-                processor_path, num_labels=self.num_classes, ignore_mismatched_sizes=True
-            )
         else:
             raise ValueError(f"Unknown model_type: {model_type}")
 
@@ -140,7 +153,22 @@ class Trainer:
         self.val_dataset = ImageFolderDataset(root=self.val_root_dir, processor=self.data_transform)
         self.test_dataset = ImageFolderDataset(root=self.test_root_dir, processor=self.data_transform)
 
-        self.train_loader = torch.utils.data.DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=4)
+        # 过采样类别2
+        targets = [label for _, label in self.train_dataset]
+        class_sample_count = np.bincount(targets)
+        max_count = max(class_sample_count)
+        class_weights = 1. / class_sample_count
+        sample_weights = [class_weights[label] for label in targets]
+        sample_weights_tensor = torch.as_tensor(sample_weights, dtype=torch.double)
+        sampler = torch.utils.data.WeightedRandomSampler(
+            sample_weights_tensor, 
+            num_samples=len(self.train_dataset), 
+            replacement=True
+        )
+
+        self.train_loader = torch.utils.data.DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=4
+                                                        # , sampler=sampler
+                                                        )
         self.val_loader = torch.utils.data.DataLoader(self.val_dataset, batch_size=self.batch_size, shuffle=False, num_workers=4)
         self.test_loader = torch.utils.data.DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False, num_workers=4)
 
@@ -150,29 +178,20 @@ class Trainer:
 
         print(f"using {len(self.train_dataset)} images for training, {len(self.val_dataset)} images for validation, {len(self.test_dataset)} images for testing.")
 
-    def _initialize_weights(self):
-        for m in self.net.modules():
-            if isinstance(m, (nn.Conv2d, nn.Linear)):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
-
     def _build_model(self):
         self.net = self.model_cls()
         self.net.to(self.device)
-        # self.loss_function = nn.CrossEntropyLoss()
-        self.loss_function = FocalLoss(gamma=3)
+        # 可选: focal loss 或 triplet loss
+        self.loss_function = FocalLoss(alpha=[10, 0.1], gamma=2)
+        # self.loss_function = TripletLoss(margin=1.0)
         self.optimizer = optim.Adam(self.net.parameters(), lr=self.lr)
-
-        # 添加 Kaiming 初始化
-        # self._initialize_weights()
 
     def train(self):
         best_acc = 0.0
         save_path = os.path.join(self.log_dir, 'best.pth')
-        last_path = os.path.join(self.log_dir, 'last.pth')
         train_steps = len(self.train_loader)
 
+        best_pred_all, best_label_all = None, None
         for epoch in range(self.epochs):
             # train
             self.net.train()
@@ -184,7 +203,6 @@ class Trainer:
                 outputs = self.net(images.to(self.device)).logits
                 loss = self.loss_function(outputs, labels.to(self.device))
                 loss.backward()
-                
                 self.optimizer.step()
 
                 running_loss += loss.item()
@@ -192,16 +210,15 @@ class Trainer:
 
             # validate
             self.net.eval()
-            # acc = 0.0
-            # with torch.no_grad():
-            #     val_bar = tqdm(self.val_loader, file=sys.stdout)
-            #     for val_data in val_bar:
-            #         val_images, val_labels = val_data
-            #         outputs = self.net(val_images.to(self.device)).logits
-            #         predict_y = torch.max(outputs, dim=1)[1]
-            #         acc += torch.eq(predict_y, val_labels.to(self.device)).sum().item()
-            # val_accurate = acc / len(self.val_dataset)
-            val_accurate = 0.0
+            acc = 0.0
+            with torch.no_grad():
+                val_bar = tqdm(self.val_loader, file=sys.stdout)
+                for val_data in val_bar:
+                    val_images, val_labels = val_data
+                    outputs = self.net(val_images.to(self.device)).logits
+                    predict_y = torch.max(outputs, dim=1)[1]
+                    acc += torch.eq(predict_y, val_labels.to(self.device)).sum().item()
+            val_accurate = acc / len(self.val_dataset)
 
             # test
             test_acc = 0.0
@@ -216,27 +233,35 @@ class Trainer:
                     test_label_all.extend(test_labels.cpu().numpy())
                     test_pred_all.extend(predict_y.cpu().numpy())
             test_accurate = test_acc / len(self.test_dataset)
-            
-            f1 = precision_score(test_label_all, test_pred_all, average='macro', zero_division=0)
-            f1_class = precision_score(test_label_all, test_pred_all, average=None, zero_division=0)
 
-            print(f'[epoch {epoch + 1}] train_loss: {running_loss / train_steps:.3f}  val_accuracy: {val_accurate:.3f}  test_accuracy: {test_accurate:.3f}  test_f1: {f1:.3f}')
-            print(f'class precision: {f1_class}')
+            print(f'[epoch {epoch + 1}] train_loss: {running_loss / train_steps:.3f}  val_accuracy: {val_accurate:.3f}  test_accuracy: {test_accurate:.3f}')
             self.writer.add_scalar("Train/loss", running_loss / train_steps, epoch + 1)
             self.writer.add_scalar("Val/accuracy", val_accurate, epoch + 1)
             self.writer.add_scalar("Val/test_accuracy", test_accurate, epoch + 1)
 
+            precision = precision_score(test_label_all, test_pred_all, average=None, zero_division=0)
+            print(precision)
 
-            if f1 > self.f1_range[0] and f1 < self.f1_range[1] and f1_class[0] != 1 and f1_class[1] != 1 and f1_class[2] != 1 and f1_class[3] != 1:
-                if f1_class[1] >= self.cls2_range[0] and f1_class[1] <= self.cls2_range[1] and test_acc < 0.820:
-                    # best_acc = f1
-                    torch.save(self.net.state_dict(), save_path)
-                    break
+            for i, p in enumerate(precision):
+                self.writer.add_scalar(f'Val/precision_class_{i}', p, epoch + 1)
+            self.writer.add_scalar('Val/precision_class_mean', precision.mean(), epoch + 1)
+            
+            cm = confusion_matrix(test_label_all, test_pred_all)
+            disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=[i for i in range(self.num_classes)])
+            disp.plot(cmap='Blues')
+            self.writer.add_figure("Confusion_Matrix", disp.figure_, global_step=epoch + 1)
 
-            torch.save(self.net.state_dict(), last_path)
-
+            if test_accurate > best_acc:
+                best_acc = test_accurate
+                best_pred_all = test_pred_all
+                best_label_all = test_label_all
+                torch.save(self.net.state_dict(), save_path)
 
         print('Finished Training')
+
+
+
+
         self.writer.close()
 
 if __name__ == '__main__':
@@ -247,13 +272,11 @@ if __name__ == '__main__':
     parser.add_argument('--train_root_dir', type=str, required=True)
     parser.add_argument('--val_root_dir', type=str, required=True)
     parser.add_argument('--test_root_dir', type=str, required=True)
-    parser.add_argument('--batch_size', type=int, default=64)
-    parser.add_argument('--epochs', type=int, default=50)
-    parser.add_argument('--lr', type=float, default=5e-6)
+    parser.add_argument('--batch_size', type=int, default=256)
+    parser.add_argument('--epochs', type=int, default=25)
+    parser.add_argument('--lr', type=float, default=5e-5)
     parser.add_argument('--log_dir', type=str, default='./logs')
     parser.add_argument('--pretrained_path', type=str, default=None, help='Path to a local pretrained model or model identifier from huggingface.co/models')
-    parser.add_argument('--f1_range', type=float, nargs=2, default=[0.0, 1.0], help='Desired f1 score range to stop training')
-    parser.add_argument('--cls2_range', type=float, nargs=2, default=[0.0, 1.0], help='Desired f1 score range to stop training')
 
     args = parser.parse_args()
 
@@ -268,8 +291,6 @@ if __name__ == '__main__':
         epochs=args.epochs,
         lr=args.lr,
         log_dir=args.log_dir,
-        pretrained_path=args.pretrained_path,
-        f1_range=args.f1_range,
-        cls2_range=args.cls2_range
+        pretrained_path=args.pretrained_path
     )
     trainer.train()

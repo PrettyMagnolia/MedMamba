@@ -13,6 +13,12 @@ from tqdm import tqdm
 from MedMamba import VSSM as medmamba  # import model
 from torch.utils.tensorboard import SummaryWriter
 
+from sklearn.metrics import (
+    precision_score, recall_score, roc_auc_score, f1_score,
+    confusion_matrix, accuracy_score, ConfusionMatrixDisplay,
+    RocCurveDisplay, PrecisionRecallDisplay
+)
+
 class Trainer:
     def __init__(self, model_name, num_classes, train_root_dir, val_root_dir, test_root_dir,
                  batch_size=32, epochs=100, lr=5e-6, log_dir='./logs'):
@@ -34,8 +40,9 @@ class Trainer:
 
         self.data_transform = {
             "train": transforms.Compose([
-                transforms.RandomResizedCrop(224),
-                transforms.RandomHorizontalFlip(),
+                # transforms.RandomResizedCrop(224),
+                # transforms.RandomHorizontalFlip(),
+                transforms.Resize((224, 224)),
                 transforms.ToTensor(),
                 transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
             ]),
@@ -135,7 +142,7 @@ if __name__ == '__main__':
     parser.add_argument('--val_root_dir', type=str, required=True)
     parser.add_argument('--test_root_dir', type=str, required=True)
     parser.add_argument('--batch_size', type=int, default=32)
-    parser.add_argument('--epochs', type=int, default=100)
+    parser.add_argument('--epochs', type=int, default=25)
     parser.add_argument('--lr', type=float, default=5e-6)
     parser.add_argument('--log_dir', type=str, default='./logs')
 
