@@ -206,34 +206,50 @@ class Trainer:
             # test
             test_acc = 0.0
             test_label_all, test_pred_all = [], []
+            test_probs = []
             with torch.no_grad():
                 test_bar = tqdm(self.test_loader, file=sys.stdout)
                 for test_data in test_bar:
                     test_images, test_labels = test_data
                     outputs = self.net(test_images.to(self.device)).logits
+                    probs = torch.softmax(outputs, dim=1)
                     predict_y = torch.max(outputs, dim=1)[1]
                     test_acc += torch.eq(predict_y, test_labels.to(self.device)).sum().item()
                     test_label_all.extend(test_labels.cpu().numpy())
                     test_pred_all.extend(predict_y.cpu().numpy())
+                    test_probs.append(probs.cpu().numpy())
             test_accurate = test_acc / len(self.test_dataset)
             
             f1 = precision_score(test_label_all, test_pred_all, average='macro', zero_division=0)
             f1_class = precision_score(test_label_all, test_pred_all, average=None, zero_division=0)
 
-            print(f'[epoch {epoch + 1}] train_loss: {running_loss / train_steps:.3f}  val_accuracy: {val_accurate:.3f}  test_accuracy: {test_accurate:.3f}  test_f1: {f1:.3f}')
+            aucs = []
+            for i in range(self.num_classes):
+                import numpy as np
+                label_numpy = np.array(test_label_all)
+                probs_numpy = np.vstack(test_probs)
+                auc = roc_auc_score((label_numpy == i).astype(int), probs_numpy[:, i])
+                aucs.append(auc)
+            auc = sum(aucs) / len(aucs)
+
+            print(f'[epoch {epoch + 1}] train_loss: {running_loss / train_steps:.3f}  val_accuracy: {val_accurate:.3f}  test_accuracy: {test_accurate:.3f}  test_f1: {f1:.3f}, auc: {auc:.3f}')
             print(f'class precision: {f1_class}')
+            print(f'aucs: {aucs}')
             self.writer.add_scalar("Train/loss", running_loss / train_steps, epoch + 1)
             self.writer.add_scalar("Val/accuracy", val_accurate, epoch + 1)
             self.writer.add_scalar("Val/test_accuracy", test_accurate, epoch + 1)
 
 
-            if f1 > self.f1_range[0] and f1 < self.f1_range[1] and f1_class[0] != 1 and f1_class[1] != 1 and f1_class[2] != 1 and f1_class[3] != 1:
-                if f1_class[1] >= self.cls2_range[0] and f1_class[1] <= self.cls2_range[1] and test_acc < 0.820:
-                    # best_acc = f1
-                    torch.save(self.net.state_dict(), save_path)
-                    break
+            # if f1 > self.f1_range[0] and f1 < self.f1_range[1] and f1_class[0] != 1 and f1_class[1] != 1 and f1_class[2] != 1 and f1_class[3] != 1:
+            #     if f1_class[1] >= self.cls2_range[0] and f1_class[1] <= self.cls2_range[1] and test_acc < 0.820:
+            #         # best_acc = f1
+            #         torch.save(self.net.state_dict(), save_path)
+            #         break
 
             torch.save(self.net.state_dict(), last_path)
+
+            import time
+            time.sleep(1)
 
 
         print('Finished Training')

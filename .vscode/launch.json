@@ -4,22 +4,29 @@
     // 欲了解更多信息，请访问: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
+        
+
+
+
+
+
         {
             "name": "Python: Train Swin Model",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/train_baselines.py",
-            "args": [
-                "--model_type", "swin",
-                "--pretrained_path", "/mnt/user_data/yifei/models/med_cv/swin-tiny-patch4-window7-224",
-                "--model_name", "Spatial_Task_Swin",
-                "--num_classes", "4",
-                "--train_root_dir", "${workspaceFolder}/dataset/4_spatial_task_t/train",
-                "--val_root_dir", "${workspaceFolder}/dataset/4_spatial_task_t/val",
-                "--test_root_dir", "${workspaceFolder}/dataset/4_spatial_task_t/test",
-                "--epochs", "100"
-            ],
-            "console": "integratedTerminal"
+            "program": "${workspaceFolder}/grad_cam.py",
+            // "args": [
+            //     "--model_type", "swin",
+            //     "--pretrained_path", "/mnt/user_data/yifei/models/med_cv/swin-tiny-patch4-window7-224",
+            //     "--model_name", "Spatial_Task_Swin",
+            //     "--num_classes", "4",
+            //     "--train_root_dir", "${workspaceFolder}/dataset/4_spatial_task_t/train",
+            //     "--val_root_dir", "${workspaceFolder}/dataset/4_spatial_task_t/val",
+            //     "--test_root_dir", "${workspaceFolder}/dataset/4_spatial_task_t/test",
+            //     "--epochs", "100"
+            // ],
+            "console": "integratedTerminal",
+            "justMyCode": false
         }
     ]
 }

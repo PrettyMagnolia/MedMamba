@@ -47,7 +47,8 @@ class Tester:
         self.batch_size = batch_size
 
         # self.output_dir = os.path.dirname(os.path.abspath(self.ckpt_path))
-        # os.makedirs(self.output_dir, exist_ok=True)
+        self.output_dir = '/home/yifei/code/Med_CV/MedMamba/logs/Spatial_Task_Swin_All_Ensemble_Three'
+        os.makedirs(self.output_dir, exist_ok=True)
 
         # 选择模型和预处理
         if model_type == "resnet":
@@ -234,57 +235,57 @@ class Tester:
 
         # 混淆矩阵
         cm = confusion_matrix(labels, preds, labels=range(self.num_classes))
-        disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=self.class_names)
+        disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=['apical + between the roots', 'buccal', 'lingual'])
         disp.plot(cmap=plt.cm.Blues)
         plt.title("Confusion Matrix")
         plt.savefig(os.path.join(self.output_dir, "confusion_matrix.png"))
         plt.close()
 
-        # ROC 曲线，每个类别一个子图
-        fig, axes = plt.subplots(1, self.num_classes, figsize=(6 * self.num_classes, 5))
-        if self.num_classes == 1:
-            axes = [axes]
-        for i in range(self.num_classes):
-            ax = axes[i]
-            try:
-                RocCurveDisplay.from_predictions(
-                    (labels == i).astype(int), probs[:, i], name=self.class_names[i], ax=ax
-                )
-                ax.set_title(f"ROC Curve: {self.class_names[i]}")
-            except Exception:
-                ax.set_title(f"ROC Curve: {self.class_names[i]} (Error)")
-        plt.tight_layout()
-        plt.savefig(os.path.join(self.output_dir, "roc_curves_subplots.png"))
-        plt.close()
+        # # ROC 曲线，每个类别一个子图
+        # fig, axes = plt.subplots(1, self.num_classes, figsize=(6 * self.num_classes, 5))
+        # if self.num_classes == 1:
+        #     axes = [axes]
+        # for i in range(self.num_classes):
+        #     ax = axes[i]
+        #     try:
+        #         RocCurveDisplay.from_predictions(
+        #             (labels == i).astype(int), probs[:, i], name=self.class_names[i], ax=ax
+        #         )
+        #         ax.set_title(f"ROC Curve: {self.class_names[i]}")
+        #     except Exception:
+        #         ax.set_title(f"ROC Curve: {self.class_names[i]} (Error)")
+        # plt.tight_layout()
+        # plt.savefig(os.path.join(self.output_dir, "roc_curves_subplots.png"))
+        # plt.close()
 
-        # PR 曲线，每个类别一个子图
-        fig, axes = plt.subplots(1, self.num_classes, figsize=(6 * self.num_classes, 5))
-        if self.num_classes == 1:
-            axes = [axes]
-        for i in range(self.num_classes):
-            ax = axes[i]
-            try:
-                PrecisionRecallDisplay.from_predictions(
-                    (labels == i).astype(int), probs[:, i], name=self.class_names[i], ax=ax
-                )
-                ax.set_title(f"PR Curve: {self.class_names[i]}")
-            except Exception:
-                ax.set_title(f"PR Curve: {self.class_names[i]} (Error)")
-        plt.tight_layout()
-        plt.savefig(os.path.join(self.output_dir, "pr_curves_subplots.png"))
-        plt.close()
+        # # PR 曲线，每个类别一个子图
+        # fig, axes = plt.subplots(1, self.num_classes, figsize=(6 * self.num_classes, 5))
+        # if self.num_classes == 1:
+        #     axes = [axes]
+        # for i in range(self.num_classes):
+        #     ax = axes[i]
+        #     try:
+        #         PrecisionRecallDisplay.from_predictions(
+        #             (labels == i).astype(int), probs[:, i], name=self.class_names[i], ax=ax
+        #         )
+        #         ax.set_title(f"PR Curve: {self.class_names[i]}")
+        #     except Exception:
+        #         ax.set_title(f"PR Curve: {self.class_names[i]} (Error)")
+        # plt.tight_layout()
+        # plt.savefig(os.path.join(self.output_dir, "pr_curves_subplots.png"))
+        # plt.close()
 
-        # 保存指标
-        metrics_file = os.path.join(self.output_dir, "test_metrics.txt")
-        with open(metrics_file, "w") as f:
-            f.write(f"FLOPs: {metrics['flops']}\n")
-            f.write(f"Params: {metrics['params']}\n")
-            f.write(f"Accuracy: {metrics['accuracy']:.3f}\n")
-            f.write(f"Precision (per class): {metrics['precision']}\n")
-            f.write(f"Sensitivity/Recall (per class): {metrics['recall']}\n")
-            f.write(f"Specificity (per class): {metrics['specificity']}\n")
-            f.write(f"F1 Score (per class): {metrics['f1']}\n")
-            f.write(f"AUC (per class): {metrics['auc']}\n")
+        # # 保存指标
+        # metrics_file = os.path.join(self.output_dir, "test_metrics.txt")
+        # with open(metrics_file, "w") as f:
+        #     f.write(f"FLOPs: {metrics['flops']}\n")
+        #     f.write(f"Params: {metrics['params']}\n")
+        #     f.write(f"Accuracy: {metrics['accuracy']:.3f}\n")
+        #     f.write(f"Precision (per class): {metrics['precision']}\n")
+        #     f.write(f"Sensitivity/Recall (per class): {metrics['recall']}\n")
+        #     f.write(f"Specificity (per class): {metrics['specificity']}\n")
+        #     f.write(f"F1 Score (per class): {metrics['f1']}\n")
+        #     f.write(f"AUC (per class): {metrics['auc']}\n")
 
     def run_all(self):
         labels, preds, probs = self.get_preds_labels_probs()
@@ -297,7 +298,7 @@ class Tester:
         print(f"Specificity (per class): {metrics['specificity']}")
         print(f"F1 Score (per class): {metrics['f1']}")
         print(f"AUC (per class): {metrics['auc']}")
-        # self.output_results(labels, preds, probs, metrics)
+        self.output_results(labels, preds, probs, metrics)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

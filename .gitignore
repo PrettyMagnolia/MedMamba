@@ -2,3 +2,5 @@ dataset/
 __pycache__
 logs/
 0_trash/
+tsne_coordinates_output/
+gradcam_outputs/
